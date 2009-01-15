@@ -21,6 +21,9 @@ size_uncompressed(B) when is_record(B, bitplus) -> bit_size(decompress(B)).
 get(#bitplus{data=_B}, _N) ->
     void.
 
+logical_and(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lAnd(B1, B2)}.
+logical_or(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lOr(B1, B2)}.
+
 %% Internal functions
 
 %%
@@ -50,14 +53,9 @@ lAnd([{literal, 31, LiteralA}|RestA], [{literal, 31, LiteralB}|RestB], Acc) ->
     C = A band B,
     BinC = <<C:31>>,
     Pat0 = all_zeros31(),
-    Pat1 = all_ones31(),
     FinalC = case BinC of
-        Pat0 -> % ANDing resulted in 0-fill word
-            {fill, 0, 1};
-        Pat1 -> % ANDing resulted in 1-fill word
-            {fill, 1, 1};
-        _ ->
-            {literal, 31, BinC}
+        Pat0 -> {fill, 0, 1}; % ANDing resulted in 0-fill word
+        _ -> {literal, 31, BinC}
     end,
     lAnd(RestA, RestB, check_prev(FinalC, Acc));
 lAnd([{literal, LengthA, LiteralA}|[]], [{literal, LengthB, LiteralB}|[]], Acc) when LengthA == LengthB ->
@@ -68,6 +66,44 @@ lAnd([{literal, LengthA, LiteralA}|[]], [{literal, LengthB, LiteralB}|[]], Acc) 
     lAnd([],[],check_prev(BinC, Acc));
 lAnd([],[],Acc) ->
     lists:reverse(Acc).
+
+
+lOr(A, B) when is_bitstring(A) andalso is_bitstring(B) ->
+    DWordsC = lOr(decompose(A), decompose(B), []),
+    pack(DWordsC).
+lOr([{fill, 1, N}|RestA], B, Acc) ->
+    lOr(RestA, skipN(N, B), check_prev({fill, 1, N}, Acc));
+lOr([{fill, 0, N}|RestA], B, Acc) ->
+    {FirstNofB, RestB} = splitN(N, B),
+    [X|Y] = FirstNofB,
+    Acc1 = lists:reverse(Y) ++ check_prev(X, Acc),
+    lOr(RestA, RestB, Acc1);
+lOr([{literal, _, _}|RestA], [{fill, 1, N}|RestB], Acc) ->
+    B = [{fill, 1, N}|RestB],
+    lOr(RestA, skipN(1, B), check_prev({fill, 1, 1}, Acc));
+lOr([{literal, Length, Literal}|RestA], [{fill, 0, N}|RestB], Acc) ->
+    B = [{fill, 0, N}|RestB],
+    lOr(RestA, skipN(1, B), check_prev({literal, Length, Literal}, Acc));
+lOr([{literal, 31, LiteralA}|RestA], [{literal, 31, LiteralB}|RestB], Acc) ->
+    <<A:31>> = LiteralA,
+    <<B:31>> = LiteralB,
+    C = A bor B,
+    BinC = <<C:31>>,
+    Pat1 = all_ones31(),
+    FinalC = case BinC of
+        Pat1 -> {fill, 1, 1}; % ANDing resulted in 1-fill word
+        _ -> {literal, 31, BinC}
+    end,
+    lOr(RestA, RestB, check_prev(FinalC, Acc));
+lOr([{literal, LengthA, LiteralA}|[]], [{literal, LengthB, LiteralB}|[]], Acc) when LengthA == LengthB ->
+    <<A:LengthA>> = LiteralA,
+    <<B:LengthB>> = LiteralB,
+    C = A bor B,
+    BinC = <<C:LengthA>>,
+    lOr([],[],check_prev(BinC, Acc));
+lOr([],[],Acc) ->
+    lists:reverse(Acc).
+
 
 %% perform CONS operation aka [H|T] after checking for 
 %% the possibility of 2 similar fill words being adjacent two each other.
