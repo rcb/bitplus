@@ -1,6 +1,6 @@
 -module(bitplus).
 
-%%-export([compress/1, decompress/1, empty/0, size_compressed/1, size_uncompressed/1]).
+%%-export([compress/1, decompress/1, empty/0, size_compressed/1, size_decompressed/1]).
 -compile(export_all).
 
 -record(bitplus, {data}).
@@ -14,8 +14,7 @@ decompress(#bitplus{data=B}) ->
 empty() -> compress(<<>>).
 
 size_compressed(#bitplus{data=B}) -> bit_size(B).
-%% FIXME: the implementation for size_uncompressed is naive. Must be possible to do this without decompression.
-size_uncompressed(B) when is_record(B, bitplus) -> bit_size(decompress(B)).
+size_decompressed(#bitplus{data=B}) -> size_(B).
 
 %% get nth bit from bitmap
 get(#bitplus{data=_B}, _N) ->
@@ -23,13 +22,23 @@ get(#bitplus{data=_B}, _N) ->
 
 logical_and(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lAnd(B1, B2)}.
 logical_or(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lOr(B1, B2)}.
+logical_not(#bitplus{data=B}) -> #bitplus{data=lNot(B)}.
 
 %% Internal functions
+
+%% compute the size of a compressed bitstring without decompressing it.
+size_(B) when is_bitstring(B) -> size_(decompose(B), 0).
+size_([{fill, _, N}|Rest], Acc) -> size_(Rest, 31*N + Acc);
+size_([{literal, Length, _}|Rest], Acc) -> size_(Rest, Length + Acc);
+size_([], Acc) -> Acc.
 
 %%
 %% Logical Operations - AND, OR, NOT
 %% Perform these operations directly on the compressed bitstrings without decompressing them.
 %%
+
+lNot(B) when is_bitstring(B) ->
+    B.
 
 lAnd(A, B) when is_bitstring(A) andalso is_bitstring(B) ->
     DWordsC = lAnd(decompose(A), decompose(B), []),
