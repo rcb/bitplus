@@ -63,7 +63,7 @@ lAnd([{literal, LengthA, LiteralA}|[]], [{literal, LengthB, LiteralB}|[]], Acc) 
     <<B:LengthB>> = LiteralB,
     C = A band B,
     BinC = <<C:LengthA>>,
-    lAnd([],[],check_prev(BinC, Acc));
+    lAnd([],[],check_prev({literal, LengthA, BinC}, Acc));
 lAnd([],[],Acc) ->
     lists:reverse(Acc).
 
@@ -100,7 +100,7 @@ lOr([{literal, LengthA, LiteralA}|[]], [{literal, LengthB, LiteralB}|[]], Acc) w
     <<B:LengthB>> = LiteralB,
     C = A bor B,
     BinC = <<C:LengthA>>,
-    lOr([],[],check_prev(BinC, Acc));
+    lOr([],[],check_prev({literal, LengthA, BinC}, Acc));
 lOr([],[],Acc) ->
     lists:reverse(Acc).
 
