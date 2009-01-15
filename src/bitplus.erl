@@ -18,20 +18,94 @@ size_compressed(#bitplus{data=B}) -> bit_size(B).
 size_uncompressed(B) when is_record(B, bitplus) -> bit_size(decompress(B)).
 
 %% get nth bit from bitmap
-get(#bitplus{data=B}, N) ->
+get(#bitplus{data=_B}, _N) ->
     void.
 
 %% Internal functions
+
+%%
+%% Logical Operations - AND, OR, NOT
+%% Perform these operations directly on the compressed bitstrings without decompressing them.
+%%
+
+lAnd(A, B) when is_bitstring(A) andalso is_bitstring(B) ->
+    DWordsC = lAnd(decompose(A), decompose(B), []),
+    pack(DWordsC).
+lAnd([{fill, 0, N}|RestA], B, Acc) ->
+    lAnd(RestA, skipN(N, B), check_prev({fill, 0, N}, Acc));
+lAnd([{fill, 1, N}|RestA], B, Acc) ->
+    {FirstNofB, RestB} = splitN(N, B),
+    [X|Y] = FirstNofB,
+    Acc1 = lists:reverse(Y) ++ check_prev(X, Acc),
+    lAnd(RestA, RestB, Acc1);
+lAnd([{literal, _, _}|RestA], [{fill, 0, N}|RestB], Acc) ->
+    B = [{fill, 0, N}|RestB],
+    lAnd(RestA, skipN(1, B), check_prev({fill, 0, 1}, Acc));
+lAnd([{literal, Length, Literal}|RestA], [{fill, 1, N}|RestB], Acc) ->
+    B = [{fill, 1, N}|RestB],
+    lAnd(RestA, skipN(1, B), check_prev({literal, Length, Literal}, Acc));
+lAnd([{literal, 31, LiteralA}|RestA], [{literal, 31, LiteralB}|RestB], Acc) ->
+    <<A:31>> = LiteralA,
+    <<B:31>> = LiteralB,
+    C = A band B,
+    BinC = <<C:31>>,
+    Pat0 = all_zeros31(),
+    Pat1 = all_ones31(),
+    FinalC = case BinC of
+        Pat0 -> % ANDing resulted in 0-fill word
+            {fill, 0, 1};
+        Pat1 -> % ANDing resulted in 1-fill word
+            {fill, 1, 1};
+        _ ->
+            {literal, 31, BinC}
+    end,
+    lAnd(RestA, RestB, check_prev(FinalC, Acc));
+lAnd([{literal, LengthA, LiteralA}|[]], [{literal, LengthB, LiteralB}|[]], Acc) when LengthA == LengthB ->
+    <<A:LengthA>> = LiteralA,
+    <<B:LengthB>> = LiteralB,
+    C = A band B,
+    BinC = <<C:LengthA>>,
+    lAnd([],[],check_prev(BinC, Acc));
+lAnd([],[],Acc) ->
+    lists:reverse(Acc).
+
+%% perform CONS operation aka [H|T] after checking for 
+%% the possibility of 2 similar fill words being adjacent two each other.
+%% If yes, modify the first elem of T and return the new list.
+%% If no, just do plain old CONS.
+check_prev({fill, FillBit, N}, [{fill, FillBit, M}|T]) -> [{fill, FillBit, N+M}|T];
+check_prev(H, T) -> [H|T].
+
+
+%% split DWords list into {FirstN, Rest}
+splitN(N, DWords) ->
+    {FirstN, Rest} = splitN(N, DWords, []),
+    {lists:reverse(FirstN), Rest}.
+splitN(0, RestDWords, Acc) -> {Acc, RestDWords};
+splitN(N, [{fill, FillBit, M}|RestDWords], Acc) when N < M -> 
+    {[{fill, FillBit, N}|Acc], [{fill, FillBit, M-N}|RestDWords]};
+splitN(N, [{fill, FillBit, M}|RestDWords], Acc) when N == M ->
+    {[{fill, FillBit, M}|Acc], RestDWords};
+splitN(N, [{fill, FillBit, M}|RestDWords], Acc) when N > M ->
+    splitN(N-M, RestDWords, [{fill, FillBit, M}|Acc]);
+splitN(N, [{literal, Length, Literal}|RestDWords], Acc) ->
+    splitN(N-1, RestDWords, [{literal, Length, Literal}|Acc]).
+
+%% skip N words in the DWords list and return the remaining list
+skipN(0, DWords) -> DWords;
+skipN(N, [{fill, FillBit, M}|RestDWords]) when N < M -> [{fill, FillBit, M-N}|RestDWords];
+skipN(N, [{fill, _FillBit, M}|RestDWords]) when N == M -> RestDWords;
+skipN(N, [{fill, _FillBit, M}|RestDWords]) when N > M -> skipN(N-M, RestDWords);
+skipN(N, [{literal, _Length, _Literal}|RestDWords]) -> skipN(N-1, RestDWords).
 
 %%
 %% Decompression
 %%
 
 decompress_(B) ->
-    Words = decompose(B),
-    Bins = lists:reverse(decompress_(Words, [])),
+    DWords = decompose(B),
+    Bins = lists:reverse(decompress_(DWords, [])),
     list_to_bitstring(Bins). % join the list of 31-bit bitstrings into 1 long bitstring. 
-
 decompress_([{fill, 0, N}|Rest], Acc) -> decompress_(Rest, replicate(all_zeros31(), N) ++ Acc);
 decompress_([{fill, 1, N}|Rest], Acc) -> decompress_(Rest, replicate(all_ones31(), N) ++ Acc);
 decompress_([{literal, _Length, Literal}|Rest], Acc) -> decompress_(Rest, [Literal|Acc]);
@@ -63,10 +137,21 @@ decompose(B, Acc) when bit_size(B) == 64 -> % last 2 words - (active word + mask
     end,
     [G1|Acc].
 
+%% Pack DWords back into the original compressed bitstring.
+%% Opposite of decompose/1.
+pack(DWords) -> list_to_bitstring(lists:reverse(pack(DWords, []))).
+pack([{fill, 0, N}|RestDWords], Acc) -> pack(RestDWords, [<<2#10:2, N:30>>|Acc]);
+pack([{fill, 1, N}|RestDWords], Acc) -> pack(RestDWords, [<<2#11:2, N:30>>|Acc]);
+pack([{literal, 31, <<Literal:31>>}|RestDWords], Acc) -> pack(RestDWords, [<<2#0:1, Literal:31>>|Acc]);
+pack([{literal, Length, Literal}|[]], Acc) ->
+    <<A:Length>> = Literal,
+    [<<Length:32>>|[<<A:32>>|Acc]]; % [Mask|[Active|Acc]]
+pack([], Acc) -> [<<32:32>>|Acc].
+
 %% replicate supplied W n times in a list & return the list.
 replicate(W, N) -> replicate(W, N, []).
-replicate(W, N, Acc) when N > 0 -> replicate(W, N-1, [W|Acc]);
-replicate(_W, N, Acc) when N == 0 -> Acc.
+replicate(_W, 0, Acc) -> Acc;
+replicate(W, N, Acc) -> replicate(W, N-1, [W|Acc]).
 
 %%
 %% Compression
@@ -76,7 +161,6 @@ compress_(Bin) ->
     L = split31(Bin),
     Words = lists:reverse(compress_(L, [])),
     list_to_bitstring(Words). %  join list of words into 1 long bitstring
-    
 compress_([H|Rest], Acc) when bit_size(H) == 31 ->
     Pat1 = all_ones31(),
     Pat0 = all_zeros31(),
