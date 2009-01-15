@@ -23,6 +23,20 @@ get(#bitplus{data=B}, N) ->
 
 %% Internal functions
 
+%%
+%% Decompression
+%%
+
+decompress_(B) ->
+    Words = decompose(B),
+    Bins = lists:reverse(decompress_(Words, [])),
+    list_to_bitstring(Bins). % join the list of 31-bit bitstrings into 1 long bitstring. 
+
+decompress_([{fill, 0, N}|Rest], Acc) -> decompress_(Rest, replicate(all_zeros31(), N) ++ Acc);
+decompress_([{fill, 1, N}|Rest], Acc) -> decompress_(Rest, replicate(all_ones31(), N) ++ Acc);
+decompress_([{literal, _Length, Literal}|Rest], Acc) -> decompress_(Rest, [Literal|Acc]);
+decompress_([], Acc) -> Acc.
+
 %% split a compressed bitstring (bitplus) into words.
 decompose(B) ->
     lists:reverse(decompose(B, [])).
@@ -47,52 +61,7 @@ decompose(B, Acc) when bit_size(B) == 64 -> % last 2 words - (active word + mask
         <<N:32>> -> % only N bits of active word are meaningful
             {literal, N, <<A:N>>}
     end,
-    [G1|Acc].        
-
-%%
-%% Decompression
-%%
-
-decompress_(B) ->
-    Words = split_to_words(B),
-    Bins = lists:reverse(decompress_(Words, [])),
-    list_to_bitstring(Bins). % join the list of 31-bit bitstrings into 1 long bitstring. 
-
-%% decompress list of words into the original list of 31-bit bitstrings.
-decompress_([H|Rest], Acc) when length(Rest) > 1 -> %% literal words OR fill words
-    case H of
-        <<2#10:2, N:30>> -> % 0-fill word
-            Acc1 = replicate(all_zeros31(), N) ++ Acc,
-            decompress_(Rest, Acc1);
-        <<2#11:2, N:30>> -> % 1-fill word
-            Acc1 = replicate(all_ones31(), N) ++ Acc,
-            decompress_(Rest, Acc1);
-        <<2#0:1, Literal:31>> -> % literal word
-            decompress_(Rest, [<<Literal:31>>|Acc])
-    end;    
-decompress_([H|Rest], Acc) when length(Rest) == 1 -> %% active word + mask word
-    [MaskWord|_] = Rest,
-    case MaskWord of
-        <<32:32>> -> % all 32 bits of active word are meaningful
-            case H of
-                <<2#10:2, N:30>> -> replicate(all_zeros31(), N) ++ Acc; % 0-fill
-                <<2#11:2, N:30>> -> replicate(all_ones31(), N) ++ Acc;  % 1-fill
-                <<2#0:1, Literal:31>> -> [<<Literal:31>>|Acc]           % literal
-            end;        
-        <<N:32>> -> % only N bits of active word are meaningful
-            <<Active:32>> = H,
-            [<<Active:N>>|Acc]
-    end.
-
-%% split a compressed bitstring (bitplus) into words.
-split_to_words(B) ->
-    lists:reverse(split_to_words(B, [])).
-split_to_words(B, Acc) when bit_size(B) > 0 ->
-    RestSize = bit_size(B) - 32,
-    <<G:32, Rest:RestSize>> = B,
-    split_to_words(<<Rest:RestSize>>, [<<G:32>>|Acc]);
-split_to_words(B, Acc) when bit_size(B) == 0 ->
-    Acc.    
+    [G1|Acc].
 
 %% replicate supplied W n times in a list & return the list.
 replicate(W, N) -> replicate(W, N, []).
