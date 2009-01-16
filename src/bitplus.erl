@@ -16,15 +16,62 @@ empty() -> compress(<<>>).
 size_compressed(#bitplus{data=B}) -> bit_size(B).
 size_decompressed(#bitplus{data=B}) -> size_(B).
 
-%% get nth bit from bitmap
-get(#bitplus{data=_B}, _N) ->
-    void.
+%% get the Nth bit
+get(#bitplus{data=B}, N) -> get_(B, N).
+%% set Nth bit to 0 or 1
+set(#bitplus{data=B}, N, SetBit) -> #bitplus{data=set_(B, N, SetBit)}.
 
 logical_and(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lAnd(B1, B2)}.
 logical_or(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lOr(B1, B2)}.
 logical_not(#bitplus{data=B}) -> #bitplus{data=lNot(B)}.
 
 %% Internal functions
+
+set_(B, N, 1) -> lOr(B, set_mask(size_(B), N, 1));
+set_(B, N, 0) -> lAnd(B, set_mask(size_(B), N, 0)).
+
+%% return a compressed bitstring which can act as the bitmask
+%% for setting the Nth bit of some BSize'd bitstring to the value of SetBit.
+set_mask(BSize, N, SetBit) ->
+    Tot = ceiling(BSize / 31),
+    Nth = ceiling(N / 31),
+    L1 = case Nth > 1 of 
+            true -> [{fill, bit_not(SetBit), Nth-1}]; 
+            false -> [] 
+    end,
+    L2 = case Tot-Nth == 0 of
+            true -> [set_mask_literal((BSize-1) rem 31 + 1, N, SetBit)];
+            false -> [set_mask_literal(31, N, SetBit), {fill, bit_not(SetBit), Tot-Nth}]
+    end,
+    pack(L1 ++ L2).
+
+set_mask_literal(Length, N, SetBit) ->
+    Idx = (Length-1) - ((N-1) rem Length),
+    Mask = case SetBit of
+        1 -> 1 bsl Idx;
+        0 -> bnot (1 bsl Idx)
+    end,
+    {literal, Length, <<Mask:Length>>}.
+
+%% get nth bit from bitmap without decompressing
+get_(B, N) when is_bitstring(B) -> get_(decompose(B), N);
+get_([{fill, FillBit, M}|Rest], N) when N > 0 ->
+    case N =< 31*M of
+        true -> FillBit;
+        false -> get_(Rest, N - 31*M)
+    end;
+get_([{literal, Length, Literal}|Rest], N) when N > 0 ->
+    case N =< Length of
+        true ->
+            Idx = Length - N,
+            Mask = 1 bsl Idx,
+            <<L:Length>> = Literal,
+            case (L band Mask) > 0 of
+                true -> 1;
+                false -> 0
+            end;
+        false -> get_(Rest, N - Length)
+    end.
 
 %% compute the size of a compressed bitstring without decompressing it.
 size_(B) when is_bitstring(B) -> size_(decompose(B), 0).
@@ -259,9 +306,22 @@ check_consecutive(Pattern, [H|Rest], Count) ->
             {[H|Rest], Count}
     end.
 
+
+%% Utils
+
 all_ones31() -> <<2#1111111111111111111111111111111:31>>.
 all_zeros31() -> <<2#0000000000000000000000000000000:31>>.
 is_all_ones31(<<2#1111111111111111111111111111111:31>>) -> true;
 is_all_ones31(_) -> false.
 is_all_zeros31(<<2#0000000000000000000000000000000:31>>) -> true;
 is_all_zeros31(_) -> false.
+
+ceiling(X) ->
+    T = erlang:trunc(X),
+    case (X - T) of
+        Neg when Neg < 0 -> T;
+        Pos when Pos > 0 -> T + 1;
+        _ -> T
+    end.
+bit_not(0) -> 1;
+bit_not(1) -> 0.
