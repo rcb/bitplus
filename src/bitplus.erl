@@ -20,12 +20,55 @@ size_decompressed(#bitplus{data=B}) -> size_(B).
 get(#bitplus{data=B}, N) -> get_(B, N).
 %% set Nth bit to 0 or 1
 set(#bitplus{data=B}, N, SetBit) -> #bitplus{data=set_(B, N, SetBit)}.
+%% append AppendBit to the end.
+append(#bitplus{data=B}, AppendBit) -> #bitplus{data=append_(B, AppendBit)}.
 
 logical_and(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lAnd(B1, B2)}.
 logical_or(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lOr(B1, B2)}.
 logical_not(#bitplus{data=B}) -> #bitplus{data=lNot(B)}.
 
 %% Internal functions
+
+append_(B, AppendBit) when is_bitstring(B) -> 
+    pack(lists:reverse(
+        append_(lists:reverse(decompose(B)), AppendBit)
+    ));
+append_([{fill, FillBit, N}|RestDWords], AppendBit) ->
+    [{literal, 1, <<AppendBit:1>>} | [{fill, FillBit, N} | RestDWords]];
+append_([{literal, 31, Literal}|RestDWords], AppendBit) ->
+    [{literal, 1, <<AppendBit:1>>} | [{literal, 31, Literal}|RestDWords]];
+append_([{literal, 30, Literal}|RestDWords], AppendBit) ->
+    <<N:30>> = Literal,
+    N1 = (N bsl 1) + AppendBit,
+    Literal1 = <<N1:31>>,
+    [Next|Remaining] = RestDWords,
+    Check0 = Literal1 =:= all_zeros31() andalso is_dword_0fill(Next),
+    Check1 = Literal1 =:= all_ones31() andalso is_dword_1fill(Next),
+    if
+        Check0 ->
+            {fill, 0, OldL} = Next,
+            [{fill, 0, OldL+1}|Remaining];
+        Check1 ->
+            {fill, 1, OldL} = Next,
+            [{fill, 1, OldL+1}|Remaining];
+        true ->
+            [{literal, 31, Literal1}|RestDWords]
+    end;    
+append_([{literal, Length, Literal}|RestDWords], AppendBit) ->
+    <<N:Length>> = Literal,
+    N1 = (N bsl 1) + AppendBit,
+    Length1 = Length + 1,
+    Literal1 = <<N1:Length1>>,
+    [{literal, Length1, Literal1}|RestDWords].
+    
+is_dword_0fill({fill, 0, _}) -> true;
+is_dword_0fill(_) -> false.
+is_dword_1fill({fill, 1, _}) -> true;
+is_dword_1fill(_) -> false.
+
+%%
+%% set & get
+%%
 
 set_(B, N, 1) -> lOr(B, set_mask(size_(B), N, 1));
 set_(B, N, 0) -> lAnd(B, set_mask(size_(B), N, 0)).
