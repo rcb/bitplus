@@ -304,7 +304,8 @@ check_consecutive(Pattern, [H|Rest], Count) ->
             check_consecutive(Pattern, Rest, Count+1);
         _ ->
             {[H|Rest], Count}
-    end.
+    end;
+check_consecutive(_, [], Count) -> {[], Count}.
 
 
 %% Utils
