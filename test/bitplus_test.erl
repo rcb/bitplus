@@ -70,7 +70,9 @@ append_to_empty_test() ->
 
 large_vector_test() ->
     B = random_bitmap(5000),
-    5000 = bitplus:size_decompressed(B).
+    5000 = bitplus:size_decompressed(B),
+    B = bitplus:logical_and(B, B),
+    B = bitplus:logical_or(B, B).
 
 random_bitmap(N) ->
     random_bitmap(N, bitplus:empty()).
