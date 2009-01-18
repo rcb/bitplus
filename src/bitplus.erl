@@ -50,6 +50,7 @@ logical_and(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lAnd(B1, B2)}
 
 logical_or(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lOr(B1, B2)}.
 
+% TODO
 logical_not(#bitplus{data=B}) -> #bitplus{data=lNot(B)}.
 
 %%====================================================================
