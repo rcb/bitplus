@@ -1,33 +1,60 @@
+%%%-------------------------------------------------------------------
+%%% File:      bitplus.erl
+%%% @author    Harish Mallipeddi <harish.mallipeddi@gmail.com> []
+%%% @copyright 2009 Harish Mallipeddi
+%%% @doc  
+%%%
+%%% @end  
+%%%
+%%% @since Mon Jan 19 00:11:50 SGT 2009 by Harish Mallipeddi
+%%%-------------------------------------------------------------------
 -module(bitplus).
+-author('harish.mallipeddi@gmail.com').
 
-%%-export([compress/1, decompress/1, empty/0, size_compressed/1, size_decompressed/1]).
--compile(export_all).
+-export([compress/1, decompress/1, empty/0, size_compressed/1, size_decompressed/1]).
+-export([get/2, set/3, append/2]).
+-export([logical_and/2, logical_or/2, logical_not/1]).
+%%-compile(export_all).
 
--record(bitplus, {data}).
+-include("bitplus.hrl").
 
-compress(Bin1) when is_bitstring(Bin1) ->
-    #bitplus{data=compress_(Bin1)}.
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-include("test/bitplus_test.erl").
+-endif.
 
-decompress(#bitplus{data=B}) ->
-    decompress_(B).
+%%====================================================================
+%% Public API
+%%====================================================================
+
+compress(Bin1) when is_bitstring(Bin1) -> #bitplus{data=compress_(Bin1)}.
+
+decompress(#bitplus{data=B}) -> decompress_(B).
 
 empty() -> compress(<<>>).
 
 size_compressed(#bitplus{data=B}) -> bit_size(B).
+
 size_decompressed(#bitplus{data=B}) -> size_(B).
 
 %% get the Nth bit
 get(#bitplus{data=B}, N) -> get_(B, N).
+
 %% set Nth bit to 0 or 1
 set(#bitplus{data=B}, N, SetBit) -> #bitplus{data=set_(B, N, SetBit)}.
+
 %% append AppendBit to the end.
 append(#bitplus{data=B}, AppendBit) -> #bitplus{data=append_(B, AppendBit)}.
 
 logical_and(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lAnd(B1, B2)}.
+
 logical_or(#bitplus{data=B1}, #bitplus{data=B2}) -> #bitplus{data=lOr(B1, B2)}.
+
 logical_not(#bitplus{data=B}) -> #bitplus{data=lNot(B)}.
 
+%%====================================================================
 %% Internal functions
+%%====================================================================
 
 append_(B, AppendBit) when is_bitstring(B) -> 
     pack(lists:reverse(
@@ -66,9 +93,9 @@ is_dword_0fill(_) -> false.
 is_dword_1fill({fill, 1, _}) -> true;
 is_dword_1fill(_) -> false.
 
-%%
+%%====================================================================
 %% set & get
-%%
+%%====================================================================
 
 set_(B, N, 1) -> lOr(B, set_mask(size_(B), N, 1));
 set_(B, N, 0) -> lAnd(B, set_mask(size_(B), N, 0)).
@@ -122,10 +149,9 @@ size_([{fill, _, N}|Rest], Acc) -> size_(Rest, 31*N + Acc);
 size_([{literal, Length, _}|Rest], Acc) -> size_(Rest, Length + Acc);
 size_([], Acc) -> Acc.
 
-%%
+%%====================================================================
 %% Logical Operations - AND, OR, NOT
-%% Perform these operations directly on the compressed bitstrings without decompressing them.
-%%
+%%====================================================================
 
 lNot(B) when is_bitstring(B) ->
     B.
@@ -233,9 +259,9 @@ skipN(N, [{fill, _FillBit, M}|RestDWords]) when N == M -> RestDWords;
 skipN(N, [{fill, _FillBit, M}|RestDWords]) when N > M -> skipN(N-M, RestDWords);
 skipN(N, [{literal, _Length, _Literal}|RestDWords]) -> skipN(N-1, RestDWords).
 
-%%
+%%====================================================================
 %% Decompression
-%%
+%%====================================================================
 
 decompress_(B) ->
     DWords = decompose(B),
@@ -288,9 +314,9 @@ replicate(W, N) -> replicate(W, N, []).
 replicate(_W, 0, Acc) -> Acc;
 replicate(W, N, Acc) -> replicate(W, N-1, [W|Acc]).
 
-%%
+%%====================================================================
 %% Compression
-%% 
+%%====================================================================
 
 compress_(Bin) ->
     L = split31(Bin),
@@ -369,3 +395,15 @@ ceiling(X) ->
     end.
 bit_not(0) -> 1;
 bit_not(1) -> 0.
+
+%%====================================================================
+%% Tests for internal methods
+%%====================================================================
+-ifdef(TEST).
+
+bit_not_test() ->
+    1 = bit_not(0),
+    0 = bit_not(1).
+
+
+-endif.
