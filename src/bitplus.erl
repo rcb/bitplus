@@ -69,25 +69,38 @@ append_([{literal, 30, Literal}|RestDWords], AppendBit) ->
     <<N:30>> = Literal,
     N1 = (N bsl 1) + AppendBit,
     Literal1 = <<N1:31>>,
-    [Next|Remaining] = RestDWords,
-    Check0 = Literal1 =:= all_zeros31() andalso is_dword_0fill(Next),
-    Check1 = Literal1 =:= all_ones31() andalso is_dword_1fill(Next),
     if
-        Check0 ->
-            {fill, 0, OldL} = Next,
-            [{fill, 0, OldL+1}|Remaining];
-        Check1 ->
-            {fill, 1, OldL} = Next,
-            [{fill, 1, OldL+1}|Remaining];
+        length(RestDWords) > 0 ->            
+            [Next|Remaining] = RestDWords,
+            Check0 = Literal1 =:= all_zeros31() andalso is_dword_0fill(Next),
+            Check1 = Literal1 =:= all_ones31() andalso is_dword_1fill(Next),
+            if
+                Check0 ->
+                    {fill, 0, OldL} = Next,
+                    [{fill, 0, OldL+1}|Remaining];
+                Check1 ->
+                    {fill, 1, OldL} = Next,
+                    [{fill, 1, OldL+1}|Remaining];
+                true ->
+                    [{literal, 31, Literal1}|RestDWords]
+            end;
         true ->
-            [{literal, 31, Literal1}|RestDWords]
-    end;    
+            Check0 = Literal1 =:= all_zeros31(),
+            Check1 = Literal1 =:= all_ones31(),
+            if 
+                Check0 -> [{fill, 0, 1}];
+                Check1 -> [{fill, 1, 1}];
+                true -> [{literal, 31, Literal1}]
+            end
+    end;
 append_([{literal, Length, Literal}|RestDWords], AppendBit) ->
     <<N:Length>> = Literal,
     N1 = (N bsl 1) + AppendBit,
     Length1 = Length + 1,
     Literal1 = <<N1:Length1>>,
-    [{literal, Length1, Literal1}|RestDWords].
+    [{literal, Length1, Literal1}|RestDWords];
+append_([], AppendBit) ->
+    [{literal, 1, <<AppendBit:1>>}].
     
 is_dword_0fill({fill, 0, _}) -> true;
 is_dword_0fill(_) -> false.
@@ -382,10 +395,11 @@ check_consecutive(_, [], Count) -> {[], Count}.
 
 all_ones31() -> <<2#1111111111111111111111111111111:31>>.
 all_zeros31() -> <<2#0000000000000000000000000000000:31>>.
-is_all_ones31(<<2#1111111111111111111111111111111:31>>) -> true;
-is_all_ones31(_) -> false.
-is_all_zeros31(<<2#0000000000000000000000000000000:31>>) -> true;
-is_all_zeros31(_) -> false.
+
+%%is_all_ones31(<<2#1111111111111111111111111111111:31>>) -> true;
+%%is_all_ones31(_) -> false.
+%%is_all_zeros31(<<2#0000000000000000000000000000000:31>>) -> true;
+%%is_all_zeros31(_) -> false.
 
 ceiling(X) ->
     T = erlang:trunc(X),

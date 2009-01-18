@@ -61,3 +61,20 @@ append_test() ->
     B2 = bitplus:append(B1, 1),
     Bin2 = bitplus:decompress(B2).
 
+append_to_empty_test() ->
+    Empty = bitplus:empty(),
+    B1 = bitplus:append(Empty, 0),
+    1 = bitplus:size_decompressed(B1),
+    <<2#0:1>> = bitplus:decompress(B1),
+    <<2#01:2>> = bitplus:decompress(bitplus:append(B1, 1)).
+
+large_vector_test() ->
+    B = random_bitmap(5000),
+    5000 = bitplus:size_decompressed(B).
+
+random_bitmap(N) ->
+    random_bitmap(N, bitplus:empty()).
+random_bitmap(0, B) -> B;
+random_bitmap(N, B) ->
+    B1 = bitplus:append(B, round(random:uniform())),
+    random_bitmap(N-1, B1).
